@@ -9,39 +9,15 @@ var g_nanometers_per_unit = 25400;
 var g_lines = [];
 var g_hover_point = null;
 
-var c = document.getElementById("mainCanvas2")
+var c = document.getElementById("mainCanvas")
 var ctx = c.getContext('2d');
-var base
 
 function deepCopy(item){
 	return JSON.parse(JSON.stringify(item))
 }
 
-// I kinda doubt this is going to just work...but let's try'
-function fixupElement(element, width_percent, height_percent='100%'){
-	//get DPI
-	let dpi = window.devicePixelRatio;
-
-	/* Set style to percent based */
-	element.style.width = width_percent
-	element.style.height = height_percent
-
-	/* Calculate raw pixels based on style and percent */
-
-	//get CSS height
-	//the + prefix casts it to an integer
-	//the slice method gets rid of "px"
-	let style_height = +getComputedStyle(element).getPropertyValue("height").slice(0, -2);
-	//get CSS width
-	let style_width = +getComputedStyle(element).getPropertyValue("width").slice(0, -2);
-	//scale the canvas
-	element.setAttribute('height', Math.floor(style_height * dpi));
-	element.setAttribute('width', Math.floor(style_width * dpi));
-}
-
 function clear_canvas(){
 	ctx.clearRect(0, 0 , c.width, c.height)
-	fixupElement(c, '100%', '96%')
 }
 
 
@@ -1494,6 +1470,18 @@ function load_from_svg(){
 	file_reader.readAsText(file)
 }
 
+function redraw(){
+	clear_canvas();
+	draw_axes();
+    draw_lines();
+}
+
+var g_main_div = document.getElementById("mainArea")
+var g_options_div = document.getElementById("optionsArea")
+var g_options_handler = new OptionBlockHandler(
+	g_main_div, g_options_div, true, "100%", [c], redraw
+)
+
 var g_line_mode = false;
 var g_path_mode = true;
 var g_line_started = false;
@@ -1501,10 +1489,8 @@ function game_loop() {
     var sleep_time_ms = 1000/g_frames_per_second;
 
     window.setInterval(function () {
-    	update_hover_location();
-		clear_canvas();
-		draw_axes();
-        draw_lines();
+        update_hover_location();
+        redraw()
     }, sleep_time_ms); // repeat forever, polling every second
 }
 game_loop();
