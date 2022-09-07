@@ -96,7 +96,7 @@ function draw_lines(){
     }
 }
 
-function lazy_equals(thing1, thing2){
+function lazy_equals(thing1, thing2, tolerance=0.000001){
     sanity_check(thing1)
     sanity_check(thing2)
     // Ideally, we'd use EPSILON as the tolerance:
@@ -115,7 +115,7 @@ function lazy_equals(thing1, thing2){
         return to_return;
     }
 
-    var tolerance = 0.000001
+    //var tolerance = 0.000001
     return (Math.abs(thing1 - thing2) < tolerance)
 }
 
@@ -232,78 +232,91 @@ class Point {
         return ((diffX < Number.EPSILON) && (diffY < Number.EPSILON))
         */
     }
+
+    pixels_equal(other){
+        let precision = .5
+        return (
+            lazy_equals(this.pixelX(), other.pixelX(), precision)
+            && lazy_equals(this.pixelY(), other.pixelY(), precision))
+    }
 }
 
 class Line {
-    constructor(startX, startY, endX=null, endY=null){
-        // lazy overloading to allow taking two points
-        // assume some object is a point
-        if (typeof(startX) === "object"){
-            this.startPoint = startX
-            if (startY){
-                this.endPoint = startY
-                this.finished = false
-            }
-            else {
-                this.endPoint = startPoint.copy()
-                this.finished = false;
-            }
-        } else {
-            this.startPoint = new Point(startX, startY)
-            if ((endX === null) || (endY === null)){
-                this.endPoint = new Point(startX, startY)
-                this.finished = false
-            } else {
-                this.finished = true;
-                this.endPoint = new Point(endX, endY);
-            }
-        }
+    constructor(start_point, end_point, color="black", lineWidth=1, draw_endpoints=true){
+        this.start_point = start_point
+        this.end_point = end_point
+        this.draw_endpoints = draw_endpoints
+        this.color = color
+        this.lineWidth = lineWidth
     }
 
     draw(){
-        this.startPoint.draw();
+        if (this.draw_endpoints){
+            this.start_point.draw();
+        }
 
+        ctx.save()
+        ctx.strokeStyle =  this.color;
+        ctx.lineWidth = this.lineWidth;
         ctx.beginPath();
-        ctx.moveTo(this.startPoint.pixelX(), this.startPoint.pixelY());
-        ctx.lineTo(this.endPoint.pixelX(), this.endPoint.pixelY());
+        ctx.moveTo(this.start_point.pixelX(), this.start_point.pixelY());
+        ctx.lineTo(this.end_point.pixelX(), this.end_point.pixelY());
         ctx.stroke();
 
-        if (this.finished){
-            this.endPoint.draw();
+        if (this.draw_endpoints){
+            this.end_point.draw();
         }
+        ctx.restore()
     }
 
-    realLength(){
-        return this.startPoint.realDistance(this.endPoint)
+    real_length(){
+        return this.start_point.realDistance(this.end_point)
+    }
+
+    pixel_length(){
+        return this.start_point.distance(this.end_point.pixelX(), this.end_point.pixelY())
+    }
+
+    pixels_equal(other){
+        return (
+            this.start_point.pixels_equal(other.start_point)
+            && this.end_point.pixels_equal(other.end_point)
+        )
+    }
+
+    pixel_near(pixel_x, pixel_y){
+        let separate_point_distance = (
+            this.start_point.distance(pixel_x, pixel_y)
+            + this.end_point.distance(pixel_x, pixel_y)
+        )
+        return lazy_equals(separate_point_distance, this.pixel_length(), 1)
     }
 
     is_point_on(point){
-        var separate_point_distance = this.startPoint.realDistance(point) + this.endPoint.realDistance(point)
-        return lazy_equals(separate_point_distance, this.realLength())
         // https://stackoverflow.com/questions/17692922/check-is-a-point-x-y-is-between-two-points-drawn-on-a-straight-line
         // nifty; can just check distances
-
-        // Formula
+        var separate_point_distance = this.start_point.realDistance(point) + this.end_point.realDistance(point)
+        return lazy_equals(separate_point_distance, this.real_length())
     }
 
     slope(){
-        if (lazy_equals(0, this.endPoint.realX - this.startPoint.realX)){
+        if (lazy_equals(0, this.end_point.realX - this.start_point.realX)){
             return "vertical" // TOCONSIDER
         }
-        to_return = (this.endPoint.realY - this.startPoint.realY) / (this.endPoint.realX - this.startPoint.realX)
+        to_return = (this.end_point.realY - this.start_point.realY) / (this.end_point.realX - this.start_point.realX)
         if (!to_return && to_return != 0){
             console.log("Slope returning bad value for some reason!")
-            console.log(this.startPoint)
-            console.log(this.endPoint)
+            console.log(this.start_point)
+            console.log(this.end_point)
         }
         return to_return
     }
 
     to_svg(){
-        var x1 = this.startPoint.unitX() //+ g_unit_label
-        var y1 = this.startPoint.unitY() //+ g_unit_label
-        var x2 = this.endPoint.unitX() //+ g_unit_label
-        var y2 = this.endPoint.unitY() //+ g_unit_label
+        var x1 = this.start_point.unitX() //+ g_unit_label
+        var y1 = this.start_point.unitY() //+ g_unit_label
+        var x2 = this.end_point.unitX() //+ g_unit_label
+        var y2 = this.end_point.unitY() //+ g_unit_label
         return '<line '
                     + 'x1="' + x1 + '" '
                     + 'y1="' + y1 + '" '
@@ -312,32 +325,9 @@ class Line {
                     + 'style="stroke: blue; stroke-width: 0.008;"/>'
     }
 
-    update_end_position(x, y){
-        this.endPoint.update(x, y);
-    }
-
-    finish(x, y){
-        this.finished = true;
-        this.endPoint.update(x, y);
-    }
-
     offset(offsetX, offsetY){
-        this.startPoint.offset(offsetX, offsetY);
-        if (this.finished){
-            this.endPoint.offset(offsetX, offsetY);
-        }
-    }
-
-    get_point_near(x, y){
-        if (this.startPoint.near(x,y)){
-            return this.startPoint
-        }
-        else if (this.endPoint.near(x,y)){
-            return this.endPoint
-        }
-        else{
-            return null
-        }
+        this.start_point.offset(offsetX, offsetY);
+        this.end_point.offset(offsetX, offsetY);
     }
 }
 
@@ -393,12 +383,72 @@ function find_angle(A,B,C) {
     return Math.acos((BC*BC+AB*AB-AC*AC)/(2*BC*AB));
 }
 
+function line_is_selected(line){
+    for (let i = 0; i < g_selected_lines.length; i++){
+        let selected_line = g_selected_lines[i]
+        if (selected_line.pixels_equal(line)){
+            return true
+        }
+    }
+    return false
+}
+
+var g_hover_line_path = null
+var g_hover_line = null
 class Path{
     constructor(startX, startY){
         this.points = [new Point(startX, startY)]
         this.types = ["move"]
         this.finished = false
         this.closed = false;
+        this.constraints = [{
+            "point_indexes": [0],
+            "position": [0, 0]
+        }]
+    }
+
+    add_slope_constraint(line, angle){
+        points_indexes = []
+        for (let i = 0; i < this.points.length; i++){
+            let point = this.points[i]
+            if (point.equals(line.start_point) || point.equals(line.end_point)){
+                points_indexes.push(i)
+            }
+        }
+        this.constaints.push({
+            "point_indexes": point_indexes,
+            "angle" : angle
+        })
+    }
+
+    set_hover_near(x, y){
+        if (this.points.length <= 1){
+            return null
+        }
+
+        if (this.closed){
+            var start_index = 0;
+            var prev_point = this.points[this.points.length - 1]
+        }
+        else {
+            var start_index = 1;
+            var prev_point = this.points[0]
+        }
+        for (let i = start_index; i < this.points.length; i++){
+            let point = this.points[i]
+
+            var current_line = new Line(prev_point, point, "purple", 3, false)
+            if (!line_is_selected(current_line)){
+                if (current_line.pixel_near(x, y)){
+                    g_hover_line = current_line
+                    g_hover_line_path = this
+                    return true
+                }
+            }
+            prev_point = point
+        }
+        g_hover_line = null
+        return false
     }
 
     to_lines(){
@@ -521,8 +571,6 @@ class Path{
         return outlined_points;
     }
 
-
-
     outlined_svg_d(offset){
         var outlined_points = this.outlined_points(offset);
         if (outlined_points == null){
@@ -582,6 +630,12 @@ class Path{
         this.points.push(new Point(x, y));
         this.finished = false;
         this.types.push("lineTo")
+    }
+
+    remove_last_point(){
+        this.points.pop()
+        this.types.pop()
+        this.finished = true;
     }
 
     move_to(x, y){
@@ -1000,7 +1054,35 @@ function getLockedMousePosition(c, e){
     return [x, y, null]
 }
 
-function checkHoverNear(x, y){
+function draw_hover_lines(){
+    if (g_hover_line !== null){
+        g_hover_line.draw()
+    }
+}
+
+function draw_selected_lines(){
+    for (let i = 0; i < g_selected_lines.length; i++){
+        let selected_line = g_selected_lines[i]
+        selected_line.draw()
+    }
+
+}
+
+function update_path_hover(x, y){
+    let lines_to_search = g_lines
+    if (g_selected_line_path !== null){
+        lines_to_search = [g_selected_line_path]
+    }
+    for (let i = 0; i < lines_to_search.length; i++){
+        let path = lines_to_search[i]
+        if (path.set_hover_near(x, y)){
+            return true
+        }
+    }
+    return false
+}
+
+function checkHoverNear(x, y, e){
     var near_point_found = false;
     for (var i = 0; i < g_lines.length; i++){
         near_point = g_lines[i].get_point_near(x, y)
@@ -1020,7 +1102,22 @@ function checkHoverNear(x, y){
             g_hover_point.deselect();
             g_hover_point = null;
         }
+        update_path_hover(x, y, e)
     }
+}
+
+var g_selected_lines = []
+var g_selected_line_path = null
+function transition_hover_line_to_selected_line(){
+    g_hover_line.color = "blue"
+    g_selected_lines.push(g_hover_line)
+    g_selected_line_path = g_hover_line_path
+    g_hover_line = null
+}
+
+function deselect_all_lines(){
+    g_selected_lines = []
+    g_selected_line_path = null
 }
 
 var g_selected_path = null;
@@ -1037,26 +1134,15 @@ c.addEventListener('mousedown', function(e) {
         x = g_hover_point.pixelX()
         y = g_hover_point.pixelY()
     }
-    if (g_line_mode){
-        if (!g_line_started){
-            g_line_started = true
-            g_lines.push(new Line(x, y));
-        } else {
-            g_lines[g_lines.length-1].finish(x, y);
-            if (e.shiftKey){
-                g_lines.push(new Line(x, y));
-                // g_line_started is already true
-            } else{
-                g_line_started = false;
-            }
-
-            g_prev_line = g_lines[g_lines.length-1];
-        }
-    } else if (g_path_mode){
+    if (event.button == 0){
         if (!g_selected_path){
-            g_selected_path = new Path(x, y);
-            g_selected_path.add_point(x, y);
-            g_lines.push(g_selected_path);
+            if (g_hover_line){
+                transition_hover_line_to_selected_line()
+            } else {
+                g_selected_path = new Path(x, y);
+                g_selected_path.add_point(x, y);
+                g_lines.push(g_selected_path);
+            }
         } else {
             var closed = g_selected_path.finish(x, y, angle);
             if (e.shiftKey && !closed){
@@ -1064,6 +1150,13 @@ c.addEventListener('mousedown', function(e) {
             } else {
                 g_selected_path = null;
             }
+        }
+    } else if (event.button == 2){
+        if (g_selected_path){
+            g_selected_path.remove_last_point()
+            g_selected_path = null;
+        } else if (g_selected_lines.length > 0){
+            deselect_all_lines()
         }
     }
 
@@ -1087,6 +1180,7 @@ c.addEventListener('mousemove', function(e) {
     xy = getLockedMousePosition(c, e)
     g_mouse_x = xy[0]
     g_mouse_y = xy[1]
+    update_hover_location(e)
 })
 
 c.addEventListener('wheel',function(event){
@@ -1148,6 +1242,7 @@ c.addEventListener('wheel',function(event){
     g_x_axis_pixel_offset = g_mouse_x //move_pixels_x
     g_y_axis_pixel_offset = g_mouse_y //move_pixels_y
 
+    update_hover_location(event)
     return false;
 }, false);
 
@@ -1273,14 +1368,14 @@ function get_html_value(id_list, default_value=null) {
     return default_value;
 }
 
-function update_hover_location(){
+function update_hover_location(e){
     var x = g_mouse_x;
     var y = g_mouse_y;
     if (g_line_started || g_selected_path){
         var last_line = g_lines[g_lines.length-1]
         last_line.update_end_position(x, y)
     }
-    checkHoverNear(x, y)
+    checkHoverNear(x, y, e)
 }
 
 var g_lock_angle_degrees = 0;
@@ -1474,6 +1569,8 @@ function redraw(){
     clear_canvas();
     draw_axes();
     draw_lines();
+    draw_hover_lines();
+    draw_selected_lines();
 }
 
 var g_main_div = document.getElementById("mainArea")
@@ -1482,14 +1579,12 @@ var g_options_handler = new OptionBlockHandler(
     g_main_div, g_options_div, true, "100%", [c], redraw
 )
 
-var g_line_mode = false;
-var g_path_mode = true;
 var g_line_started = false;
 function game_loop() {
     var sleep_time_ms = 1000/g_frames_per_second;
 
     window.setInterval(function () {
-        update_hover_location();
+        //update_hover_location();
         redraw()
     }, sleep_time_ms); // repeat forever, polling every second
 }
