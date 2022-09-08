@@ -73,6 +73,13 @@ div.scroll {
     <input type="file" id="svg_file" name="Load SVG" accept="image/svg"
           oninput="load_from_svg(event)"><br>
   </label>
+  <label>
+    <span>relative_angle: </span>
+    <input type="number" id="relative_angle" value=0.0><br>
+    <span>reverse: </span>
+    <input type="checkbox" id="reverse_angle" oninput="toggle_reverse_angle()" unchecked>
+    <button onclick=set_angle_constraint()>Set</button><br>
+  </label>
 </div>
 <!--
 <script src="https://pomax.github.io/bezierjs/bezier.js" type="text/javascript"></script>

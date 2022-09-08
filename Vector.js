@@ -421,6 +421,10 @@ class Path{
         })
     }
 
+    add_angle_constraint(line1, line2, angle){
+
+    }
+
     set_hover_near(x, y){
         if (this.points.length <= 1){
             return null
@@ -1106,6 +1110,10 @@ function checkHoverNear(x, y, e){
     }
 }
 
+function unlock_html_values(){
+    g_cannot_write_angle_html = false
+}
+
 var g_selected_lines = []
 var g_selected_line_path = null
 function transition_hover_line_to_selected_line(){
@@ -1113,11 +1121,13 @@ function transition_hover_line_to_selected_line(){
     g_selected_lines.push(g_hover_line)
     g_selected_line_path = g_hover_line_path
     g_hover_line = null
+    unlock_html_values()
 }
 
 function deselect_all_lines(){
     g_selected_lines = []
     g_selected_line_path = null
+    unlock_html_values()
 }
 
 var g_selected_path = null;
@@ -1159,7 +1169,7 @@ c.addEventListener('mousedown', function(e) {
             deselect_all_lines()
         }
     }
-
+    update_hover_location(e)
 })
 
 /*
@@ -1565,12 +1575,86 @@ function load_from_svg(){
     file_reader.readAsText(file)
 }
 
+function convert_lines_to_ordered_points(first_line, second_line){
+    if (first_line.end_point.equals(second_line.start_point)){
+        return [first_line.start_point, first_line.end_point, second_line.end_point]
+    } else if (first_line.start_point.equals(second_line.end_point)){
+        return [second_line.start_point, second_line.end_point, first_line.end_point]
+    } else {
+        throw "Lines do not share a point!"
+    }
+}
+
+function toggle_reverse_angle(){
+    g_reverse = !g_reverse
+    g_cannot_write_angle_html = false
+}
+
+g_cannot_write_angle_html = false
+g_relative_angle = document.getElementById("relative_angle")
+g_reverse = false
+function draw_constraints(){
+    // Prospective constraints first
+    if (g_selected_lines.length == 2){
+        // attempt to draw an angle arc
+        let ordered_points = convert_lines_to_ordered_points(
+            g_selected_lines[0], g_selected_lines[1]
+        )
+        if (g_reverse){
+            ordered_points.reverse()
+        }
+        // https://stackoverflow.com/questions/56147279/how-to-find-angle-between-two-vectors-on-canvas
+        let x1 = ordered_points[0].pixelX() - ordered_points[1].pixelX()
+        let y1 = ordered_points[0].pixelY() - ordered_points[1].pixelY()
+        let x2 = ordered_points[2].pixelX() - ordered_points[1].pixelX()
+        let y2 = ordered_points[2].pixelY()  - ordered_points[1].pixelY()
+
+        let firstAngle = Math.atan2(y1, x1);
+        let secondAngle = Math.atan2(y2, x2);
+        let angle = (secondAngle - firstAngle) * 180 / Math.PI;
+        if (angle < 0){
+            angle = 360 + angle
+        }
+
+        // update html tag
+        if (!g_cannot_write_angle_html){
+            g_cannot_write_angle_html = true
+            g_relative_angle.value = angle
+        }
+
+        ctx.beginPath()
+        ctx.arc(
+            ordered_points[1].pixelX(),
+            ordered_points[1].pixelY(),
+            15,
+            firstAngle,
+            secondAngle
+        )
+        ctx.stroke()
+        // draw arc
+        /*
+        // let's try and draw an arc from 20 pixels out...
+        vector1 = new Vector(x1, y1, 0)
+        vector1.unit().multiply(20)
+
+        vector2 = new Vector(x2, y2, 0)
+        vector2.unit().multiply(20)
+
+
+        xy_ratio_1 = y1/x1
+        xy_ratio_2 = y2/x2
+        arc_start_x =
+        */
+    }
+}
+
 function redraw(){
     clear_canvas();
     draw_axes();
     draw_lines();
     draw_hover_lines();
     draw_selected_lines();
+    draw_constraints();
 }
 
 var g_main_div = document.getElementById("mainArea")
