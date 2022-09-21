@@ -80,6 +80,25 @@ div.scroll {
     <input type="checkbox" id="reverse_angle" oninput="toggle_reverse_angle()" unchecked>
     <button onclick=set_angle_constraint()>Set</button><br>
   </label>
+    <label>
+    <span>slope: </span>
+    <input type="number" id="absolute_slope" value=0.0>
+    <button onclick=set_slope_constraint()>Set</button><br>
+  </label>
+  <label>
+    <span>distance: </span>
+    <input type="number" id="distance" value=0.0>
+     <button onclick=set_distance_constraint()>Set</button><br>
+  </label>
+  <label>
+      <br><br><br>
+      <button onclick=save_constraints()>Save</button><br>
+  </label>
+  <label>
+      <br>
+      <input type="file" id="constraint_loader" name="Load" accept="application/json"
+          oninput="load_constraints()"><br>
+  </label>
 </div>
 <!--
 <script src="https://pomax.github.io/bezierjs/bezier.js" type="text/javascript"></script>

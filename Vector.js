@@ -119,8 +119,12 @@ function lazy_equals(thing1, thing2, tolerance=0.000001){
     return (Math.abs(thing1 - thing2) < tolerance)
 }
 
+function is_value_insane(value){
+    return (!value && (value !== 0) && (value !== ""))
+}
+
 function sanity_check(insane_value){
-    if (!insane_value && (insane_value != 0) && (insane_value != "")){
+    if (is_value_insane(insane_value)){
         throw "Insane value! " + insane_value
     }
 }
@@ -132,11 +136,16 @@ class Point {
         this.angle = angle;
     }
 
-    constructor(x, y){
+    constructor(x, y, real=false){
         sanity_check(x)
         sanity_check(y)
         this.point_size = 5;
-        this.update(x, y);
+        if (real){
+            this.realX = x;
+            this.realY = y;
+        } else {
+            this.update(x, y);
+        }
         this.offsetX = 0;
         this.offsetY = 0;
         this.angle = null;
@@ -269,6 +278,15 @@ class Line {
         ctx.restore()
     }
 
+    intersects(other_line){
+        return intersect(
+            this.start_point.realX, this.start_point.realY,
+            this.end_point.realX, this.end_point.realY,
+            other_line.start_point.realX, other_line.start_point.realY,
+            other_line.end_point.realX, other_line.end_point.realY,
+        )
+    }
+
     real_length(){
         return this.start_point.realDistance(this.end_point)
     }
@@ -334,15 +352,27 @@ class Line {
 // This is ballooning out of control...
 // Some Vector stuff from https://evanw.github.io/lightgl.js/docs/vector.html
 class Vector{
-    constructor(point_or_x, y, z){
+    constructor(point_or_x, y, z, point_type="unit"){
         if (point_or_x instanceof Point){
-            this.x = point_or_x.unitX();
-            this.y = point_or_x.unitY();
+            if (point_type === "unit"){
+                this.x = point_or_x.unitX();
+                this.y = point_or_x.unitY();
+            } else if (point_type === "real"){
+                this.x = point_or_x.realX;
+                this.y = point_or_x.realY;
+            } else {
+                throw "bad point_type: " + point_type
+            }
+
             this.z = 0;
         } else {
             this.x = point_or_x;
             this.y = y;
-            this.z = z;
+            if (is_value_insane(z)){
+                this.z = 0
+            } else {
+                this.z = z;
+            }
         }
     }
 
@@ -393,36 +423,343 @@ function line_is_selected(line){
     return false
 }
 
+/*
+class Constraint{
+    constructor(){
+        this.constraints = []
+    }
+
+    push(item){
+        check_for_duplicates(item)
+    }
+}
+*/
+
+// line intercept math by Paul Bourke http://paulbourke.net/geometry/pointlineplane/
+// Determine the intersection point of two line segments
+// Return FALSE if the lines don't intersect
+function intersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+
+  // Check if none of the lines are of length 0
+    if ((x1 === x2 && y1 === y2) || (x3 === x4 && y3 === y4)) {
+        return false
+    }
+
+    denominator = ((y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1))
+
+  // Lines are parallel
+    if (Math.abs(denominator) < 1e-6) {
+        return null
+    }
+
+
+    let ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denominator
+    let ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denominator
+
+  // is the intersection along the segments
+    if (ua < -1e-6 || ua > (1+1e-6) || ub < -1e-6 || ub > (1+1e-6)) {
+        return false
+    }
+
+  // Return a object with the x and y coordinates of the intersection
+    let x = x1 + ua * (x2 - x1)
+    let y = y1 + ua * (y2 - y1)
+
+    return [x, y]
+}
+
+function point_from_position(position){
+    return new Point(
+        position[0], position[1], true
+    )
+}
+
+function real_vector_from_point(point){
+    return new Vector(point, null, null, "real")
+}
+
 var g_hover_line_path = null
 var g_hover_line = null
 class Path{
-    constructor(startX, startY){
-        this.points = [new Point(startX, startY)]
+    from_json(loaded_json){
+        let loaded_points = loaded_json["points"]
+        this.points = []
         this.types = ["move"]
-        this.finished = false
-        this.closed = false;
-        this.constraints = [{
-            "point_indexes": [0],
-            "position": [0, 0]
-        }]
+        for (let i = 0; i < loaded_points.length; i++){
+            if (i !== 0){
+                this.types.push("lineTo")
+            }
+            this.points.push(new Point(
+                loaded_points[i]["realX"], loaded_points[i]["realY"], true
+            ))
+        }
+        this.constraints = loaded_json["constraints"]
+        this.check_defined()
     }
 
-    add_slope_constraint(line, angle){
-        points_indexes = []
+    constructor(startX, startY){
+        this.finished = false;
+        this.closed = false;
+        if (typeof(startX) === "number"){
+            this.points = [new Point(startX, startY)]
+            this.types = ["move"]
+            this.constraints = []
+            this.add_constraint({
+                "point_indexes": [0],
+                "position": [this.points[0].realX, this.points[0].realY]
+            })
+        } else if (typeof(startX) === "object"){
+            this.from_json(startX)
+        } else {
+            throw "Invalid startX type " + type(startX)
+        }
+
+    }
+
+    determine_intersect_of(first_formula, second_formula, point_index){
+        if (first_formula["position"]){
+            return first_formula
+        }
+        if (second_formula["position"]){
+            return second_formula
+        }
+        // determine line intersect
+        //https://www.cuemath.com/geometry/intersection-of-two-lines/
+
+        if (!first_formula || ! second_formula){
+            return false
+        }
+
+        let a1 = first_formula["line"]["a"]
+        let b1 = first_formula["line"]["b"]
+        let c1 = first_formula["line"]["c"]
+        let a2 = second_formula["line"]["a"]
+        let b2 = second_formula["line"]["b"]
+        let c2 = second_formula["line"]["c"]
+
+        let denom = (a1 * b2) - (a2 * b1)
+        let numeratorX = (b1 * c2) - (b2 * c1)
+        let numeratorY = (c1 * a2) - (c2 * a1)
+        if (!denom){
+            console.log("Warning: No intersect")
+            return false
+        }
+
+        return {
+            "point_indexes": [point_index],
+            "position": [numeratorX / denom, numeratorY / denom]
+        }
+    }
+
+    to_json(){
+        to_return = {}
+        to_return["points"] = []
         for (let i = 0; i < this.points.length; i++){
-            let point = this.points[i]
-            if (point.equals(line.start_point) || point.equals(line.end_point)){
-                points_indexes.push(i)
+            to_return["points"].push({
+                "realX": this.points[i].realX,
+                "realY": this.points[i].realY,
+            })
+        }
+        to_return["constraints"] = this.constraints
+        //for (let i = 0; i < this.constraints.length; i++){
+        //    to_return["constraints"].push(this.constraints[i])
+        //}
+        return JSON.parse(JSON.stringify(to_return))
+    }
+
+    get_position_of(point_index){
+        for (let i = 0; i < this.constraints.length; i++){
+            let constraint = this.constraints[i]
+            if (
+                constraint["position"]
+                && constraint["point_indexes"][0] === point_index
+            ){
+                return constraint
             }
         }
-        this.constaints.push({
-            "point_indexes": point_indexes,
-            "angle" : angle
+        return null
+    }
+
+    get_constraints_for(current_index, other_index){
+        to_return = []
+        for (let i = 0; i < this.constraints.length; i++){
+            let constraint = this.constraints[i]
+            if (
+                (
+                    constraint["point_indexes"][0] == current_index
+                    || constraint["point_indexes"][1] == current_index
+                ) && (
+                    constraint["point_indexes"][0] == other_index
+                    || constraint["point_indexes"][1] == other_index
+                )
+            ){
+                to_return.push(constraint)
+            }
+        }
+        return to_return
+    }
+
+    determine_formula_for(current_index, other_index){
+        let current_position = this.get_position_of(current_index)
+        if (current_position){
+            return current_position
+        }
+        let other_position = this.get_position_of(other_index)
+        if (!other_position){
+            return false
+        }
+        let other_point = point_from_position(other_position["position"])
+
+        let constraints = this.get_constraints_for(current_index, other_index)
+        if (constraints.length > 2){
+            throw "huh, overdefined?"
+        }
+        if (constraints.length == 0){
+            return 0
+        }
+
+        let distance = null
+        let slope = null
+        distance = constraints[0]["distance"]
+        if (!distance){
+            slope = constraints[0]["slope"]
+        }
+        if (constraints.length > 1){
+            if (!(slope || slope === 0)){
+                slope = constraints[1]["slope"]
+            } else {
+                distance = constraints[1]["distance"]
+            }
+        }
+
+        if (distance && !(slope || slope === 0)){
+            throw "Not handling circles yet (distance alone)"
+        }
+        else if (distance && (slope || slope === 0)){
+            let unit_vector = new Vector(1, slope).unit()
+            let other_vector = real_vector_from_point(other_point)
+            let distance_vector = unit_vector.multiply(distance).add(other_vector)
+            return {
+                "point_indexes": [current_index],
+                "position": [distance_vector.x, distance_vector.y]
+            }
+        }
+        else if (!distance && (slope || slope === 0)){
+            return {
+                // return line in for ax + by +c = 0
+                // https://www.cuemath.com/geometry/intersection-of-two-lines/
+                "point_indexes": [current_index, other_index],
+                "line": {"a": slope, "b": -1, "c": other_point.realY - (other_point.realX * slope)}
+            }
+        } else {
+            throw "logically improbable"
+        }
+    }
+
+    wipe_implied_constraints(){
+        let to_keep = []
+        for (let i = 0; i < this.constraints.length; i++){
+            if (this.constraints[i]["implied"] === true){
+                // pass
+            } else {
+                to_keep.push(this.constraints[i])
+            }
+        }
+        this.constraints = to_keep
+    }
+
+    check_defined(){
+        this.wipe_implied_constraints()
+        for (let i = 0; i < this.points.length; i++){
+            let current_point = this.points[i]
+            let first_formula = this.determine_formula_for(i, i-1)
+            let second_formula = this.determine_formula_for(i, i+1)
+
+            let intersect_constraint =  this.determine_intersect_of(
+                first_formula, second_formula, i
+            )
+            if (intersect_constraint){
+                // add_constraint?
+                // maybe point_override instead?
+                console.log(intersect_constraint)
+                this.add_implied_constraint(intersect_constraint)
+            }
+        }
+
+    }
+
+    check_for_duplicates(){
+        // TODO
+    }
+
+    add_implied_constraint(constraint){
+        this.check_for_duplicates(constraint)
+        if (constraint["implied"] === false){
+            return
+        }
+        constraint["implied"] = true
+        this.constraints.push(constraint)
+        if (constraint["position"]){
+            let new_point = point_from_position(constraint["position"])
+            let index = constraint["point_indexes"][0]
+            if (!new_point.equals(this.points[index])){
+                this.points[index] = new_point
+            }
+        }
+    }
+
+    add_constraint(constraint){
+        console.log(constraint)
+        constraint["implied"] = false
+        this.check_for_duplicates(constraint)
+        this.constraints.push(constraint)
+        this.check_defined()
+    }
+
+
+    get_index_of(point){
+        for (let i = 0; i < this.points.length; i++){
+            let current_point = this.points[i]
+            if (current_point.equals(point)){
+                return i
+            }
+        }
+        throw "Given point does not exist!"
+    }
+
+    add_angle_constraint(points, angle){
+        if (points.length !== 3){
+            throw "Invalid number of points specified"
+        }
+        let indexes = []
+        for (let i = 0; i < points.length; i++){
+            indexes.push(this.get_index_of(points[i]))
+        }
+        this.add_constraint({
+            "angle": angle,
+            "point_indexes":indexes
         })
     }
 
-    add_angle_constraint(line1, line2, angle){
 
+    add_slope_constraint(line, slope){
+        this.add_constraint({
+            "point_indexes": [
+                this.get_index_of(line.start_point),
+                this.get_index_of(line.end_point)
+            ],
+            "slope" : slope
+        })
+    }
+
+    add_distance_constraint(line, distance){
+         this.add_constraint({
+            "point_indexes": [
+                this.get_index_of(line.start_point),
+                this.get_index_of(line.end_point)
+            ],
+            "distance": distance
+        })
     }
 
     set_hover_near(x, y){
@@ -1112,6 +1449,7 @@ function checkHoverNear(x, y, e){
 
 function unlock_html_values(){
     g_cannot_write_angle_html = false
+    g_cannot_write_single_line_html = false
 }
 
 var g_selected_lines = []
@@ -1344,6 +1682,28 @@ function download(data, filename, type) {
             window.URL.revokeObjectURL(url);
         }, 0);
     }
+}
+
+function save_constraints(){
+    to_save = []
+    for (let i = 0; i < g_lines.length; i++){
+        to_save.push(g_lines[i].to_json())
+    }
+    download(JSON.stringify(to_save, null, 4), "constraints.json", "txt")
+}
+
+function load_constraints(){
+    var file = document.getElementById('constraint_loader').files[0];
+    var file_reader = new FileReader()
+    var unhandled_lines = 0
+    console.log("Wooopppp")
+    file_reader.onloadend = (function() {
+        loaded_json = JSON.parse(this.result)
+        for (let i = 0; i < loaded_json.length; i++){
+            g_lines.push(new Path(loaded_json[i]))
+        }
+    })
+    file_reader.readAsText(file)
 }
 
 function selector_is_boolean(selector){
@@ -1590,19 +1950,80 @@ function toggle_reverse_angle(){
     g_cannot_write_angle_html = false
 }
 
+function set_angle_constraint(){
+    let angle = parseFloat(g_relative_angle.value)
+    if (g_selected_lines.length != 2){
+        alert("Must have selected exactly two lines")
+        return
+    }
+    g_selected_line_path.add_angle_constraint(
+        get_ordered_points(), angle
+    )
+}
+
+function set_slope_constraint(){
+    let slope = parseFloat(g_absolute_slope.value)
+    if (g_selected_lines.length != 1){
+        alert("Must have selected exactly one line")
+        return
+    }
+    g_selected_line_path.add_slope_constraint(g_selected_lines[0], slope)
+}
+
+function set_distance_constraint(){
+    let distance = parseFloat(document.getElementById("distance").value)
+    // TODO g_nanometers_per_unit is poorly named??
+    distance = distance / g_nanometers_per_unit
+    if (g_selected_lines.length != 1){
+        alert("Must have selected exactly one line")
+        return
+    }
+    g_selected_line_path.add_distance_constraint(g_selected_lines[0], distance)
+}
+
+
+function get_ordered_points(){
+    let ordered_points = convert_lines_to_ordered_points(
+        g_selected_lines[0], g_selected_lines[1]
+    )
+    if (g_reverse){
+        ordered_points.reverse()
+    }
+    return ordered_points
+}
+
 g_cannot_write_angle_html = false
 g_relative_angle = document.getElementById("relative_angle")
+g_absolute_slope = document.getElementById("absolute_slope")
 g_reverse = false
-function draw_constraints(){
-    // Prospective constraints first
-    if (g_selected_lines.length == 2){
-        // attempt to draw an angle arc
-        let ordered_points = convert_lines_to_ordered_points(
-            g_selected_lines[0], g_selected_lines[1]
-        )
-        if (g_reverse){
-            ordered_points.reverse()
+g_cannot_write_single_line_html = false
+
+
+function draw_selected_constraints(){
+    if (g_selected_lines.length === 1)
+    {
+        let x1 = g_selected_lines[0].start_point.realX
+        let x2 = g_selected_lines[0].end_point.realX
+        let y1 = g_selected_lines[0].start_point.realY
+        let y2 = g_selected_lines[0].end_point.realY
+        let slope = undefined
+        if (lazy_equals(x2 - x1, 0)){
+            slope = null
+        } else {
+            slope = (y2 - y1) / (x2 - x1)
         }
+
+        // TODO g_nanometers_per_unit is poorly named??
+        let distance = g_selected_lines[0].real_length() * g_nanometers_per_unit
+
+        if (!g_cannot_write_single_line_html){
+            g_cannot_write_single_line_html = true
+            g_absolute_slope.value = slope
+            document.getElementById("distance").value = distance
+        }
+    } else if (g_selected_lines.length === 2){
+        // attempt to draw an angle arc
+        let ordered_points = get_ordered_points()
         // https://stackoverflow.com/questions/56147279/how-to-find-angle-between-two-vectors-on-canvas
         let x1 = ordered_points[0].pixelX() - ordered_points[1].pixelX()
         let y1 = ordered_points[0].pixelY() - ordered_points[1].pixelY()
@@ -1631,21 +2052,12 @@ function draw_constraints(){
             secondAngle
         )
         ctx.stroke()
-        // draw arc
-        /*
-        // let's try and draw an arc from 20 pixels out...
-        vector1 = new Vector(x1, y1, 0)
-        vector1.unit().multiply(20)
-
-        vector2 = new Vector(x2, y2, 0)
-        vector2.unit().multiply(20)
-
-
-        xy_ratio_1 = y1/x1
-        xy_ratio_2 = y2/x2
-        arc_start_x =
-        */
     }
+}
+
+function draw_constraints(){
+    // Prospective constraints first
+    draw_selected_constraints()
 }
 
 function redraw(){
